@@ -203,80 +203,82 @@ def _attack(params):
     Intended for use with multiprocessing.
     """
     print 'Bee %i is joining the swarm.' % params['i']
+    # WTF it's not using default username 
+    params['username'] = 'newsapps'
+    
+    # try:
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    client.connect(
+        params['instance_name'],
+        username=params['username'],
+        key_filename=_get_pem_path(params['key_name']))
 
-    try:
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            params['instance_name'],
-            username=params['username'],
-            key_filename=_get_pem_path(params['key_name']))
+    print 'Bee %i is firing her machine gun. Bang bang!' % params['i']
 
-        print 'Bee %i is firing her machine gun. Bang bang!' % params['i']
+    options = ''
+    if params['headers'] is not '':
+        for h in params['headers'].split(';'):
+            if h != '':
+                options += ' -H "%s"' % h.strip()
 
-        options = ''
-        if params['headers'] is not '':
-            for h in params['headers'].split(';'):
-                if h != '':
-                    options += ' -H "%s"' % h.strip()
-
-        stdin, stdout, stderr = client.exec_command('tempfile -s .csv')
-        params['csv_filename'] = stdout.read().strip()
-        if params['csv_filename']:
-            options += ' -e %(csv_filename)s' % params
-        else:
-            print 'Bee %i lost sight of the target (connection timed out creating csv_filename).' % params['i']
-            return None
-            
-        if params['post_file']:
-            pem_file_path=_get_pem_path(params['key_name'])
-            os.system("scp -q -o 'StrictHostKeyChecking=no' -i %s %s %s@%s:/tmp/honeycomb" % (pem_file_path, params['post_file'], params['username'], params['instance_name']))
-            options += ' -k -T "%(mime_type)s; charset=UTF-8" -p /tmp/honeycomb' % params
+    stdin, stdout, stderr = client.exec_command('tempfile -s .csv')
+    params['csv_filename'] = stdout.read().strip()
+    if params['csv_filename']:
+        options += ' -e %(csv_filename)s' % params
+    else:
+        print 'Bee %i lost sight of the target (connection timed out creating csv_filename).' % params['i']
+        return None
+        
+    if params['post_file']:
+        pem_file_path=_get_pem_path(params['key_name'])
+        os.system("scp -q -o 'StrictHostKeyChecking=no' -i %s %s %s@%s:/tmp/honeycomb" % (pem_file_path, params['post_file'], params['username'], params['instance_name']))
+        options += ' -k -T "%(mime_type)s; charset=UTF-8" -p /tmp/honeycomb' % params
 
 
-        if params['cookies'] is not '':
-            options += ' -H \"Cookie: %ssessionid=NotARealSessionID;\"' % params['cookies']
-        else:
-            options += ' -C \"sessionid=NotARealSessionID\"'
+    if params['cookies'] is not '':
+        options += ' -H \"Cookie: %ssessionid=NotARealSessionID;\"' % params['cookies']
+    else:
+        options += ' -C \"sessionid=NotARealSessionID\"'
 
-        params['options'] = options
-        benchmark_command = 'ab -r -n %(num_requests)s -c %(concurrent_requests)s %(options)s "%(url)s"' % params
-        stdin, stdout, stderr = client.exec_command(benchmark_command)
+    params['options'] = options
+    benchmark_command = 'ab -r -n %(num_requests)s -c %(concurrent_requests)s %(options)s "%(url)s"' % params
+    stdin, stdout, stderr = client.exec_command(benchmark_command)
 
-        response = {}
+    response = {}
 
-        ab_results = stdout.read()
-        ms_per_request_search = re.search('Time\ per\ request:\s+([0-9.]+)\ \[ms\]\ \(mean\)', ab_results)
+    ab_results = stdout.read()
+    ms_per_request_search = re.search('Time\ per\ request:\s+([0-9.]+)\ \[ms\]\ \(mean\)', ab_results)
 
-        if not ms_per_request_search:
-            print 'Bee %i lost sight of the target (connection timed out running ab).' % params['i']
-            return None
+    if not ms_per_request_search:
+        print 'Bee %i lost sight of the target (connection timed out running ab).' % params['i']
+        return None
 
-        requests_per_second_search = re.search('Requests\ per\ second:\s+([0-9.]+)\ \[#\/sec\]\ \(mean\)', ab_results)
-        failed_requests = re.search('Failed\ requests:\s+([0-9.]+)', ab_results)
-        complete_requests_search = re.search('Complete\ requests:\s+([0-9]+)', ab_results)
+    requests_per_second_search = re.search('Requests\ per\ second:\s+([0-9.]+)\ \[#\/sec\]\ \(mean\)', ab_results)
+    failed_requests = re.search('Failed\ requests:\s+([0-9.]+)', ab_results)
+    complete_requests_search = re.search('Complete\ requests:\s+([0-9]+)', ab_results)
 
-        response['ms_per_request'] = float(ms_per_request_search.group(1))
-        response['requests_per_second'] = float(requests_per_second_search.group(1))
-        response['failed_requests'] = float(failed_requests.group(1))
-        response['complete_requests'] = float(complete_requests_search.group(1))
+    response['ms_per_request'] = float(ms_per_request_search.group(1))
+    response['requests_per_second'] = float(requests_per_second_search.group(1))
+    response['failed_requests'] = float(failed_requests.group(1))
+    response['complete_requests'] = float(complete_requests_search.group(1))
 
-        stdin, stdout, stderr = client.exec_command('cat %(csv_filename)s' % params)
-        response['request_time_cdf'] = []
-        for row in csv.DictReader(stdout):
-            row["Time in ms"] = float(row["Time in ms"])
-            response['request_time_cdf'].append(row)
-        if not response['request_time_cdf']:
-            print 'Bee %i lost sight of the target (connection timed out reading csv).' % params['i']
-            return None
+    stdin, stdout, stderr = client.exec_command('cat %(csv_filename)s' % params)
+    response['request_time_cdf'] = []
+    for row in csv.DictReader(stdout):
+        row["Time in ms"] = float(row["Time in ms"])
+        response['request_time_cdf'].append(row)
+    if not response['request_time_cdf']:
+        print 'Bee %i lost sight of the target (connection timed out reading csv).' % params['i']
+        return None
 
-        print 'Bee %i is out of ammo.' % params['i']
+    print 'Bee %i is out of ammo.' % params['i']
 
-        client.close()
+    client.close()
 
-        return response
-    except socket.error, e:
-        return e
+    return response
+    # except socket.error, e:
+    #     return e
 
 
 def _summarize_results(results, params, csv_filename):
@@ -409,6 +411,7 @@ def attack(url, n, c, **options):
     """
     Test the root url of this site.
     """
+    urls = url.split(";")
     username, key_name, zone, instance_ids = _read_server_list()
     headers = options.get('headers', '')
     csv_filename = options.get("csv_filename", '')
@@ -456,67 +459,73 @@ def attack(url, n, c, **options):
     print 'Each of %i bees will fire %s rounds, %s at a time.' % (instance_count, requests_per_instance, connections_per_instance)
 
     params = []
+ 
+    # Iterating through the URLS
+    # TODO : iterate through the URL randomly and with weight (get levels 4, write 2, rest 1)
+    for url in urls:
+        for i, instance in enumerate(instances):
+            params.append({
+                'i': i,
+                'instance_id': instance.id,
+                'instance_name': instance.public_dns_name,
+                'url': url,
+                'concurrent_requests': connections_per_instance,
+                'num_requests': requests_per_instance,
+                'username': username,
+                'key_name': key_name,
+                'headers': headers,
+                'cookies': cookies,
+                'post_file': options.get('post_file'),
+                'mime_type': options.get('mime_type', ''),
+                'tpr': options.get('tpr'),
+                'rps': options.get('rps')
+            })
 
-    for i, instance in enumerate(instances):
-        params.append({
-            'i': i,
-            'instance_id': instance.id,
-            'instance_name': instance.public_dns_name,
-            'url': url,
-            'concurrent_requests': connections_per_instance,
-            'num_requests': requests_per_instance,
-            'username': username,
-            'key_name': key_name,
-            'headers': headers,
-            'cookies': cookies,
-            'post_file': options.get('post_file'),
-            'mime_type': options.get('mime_type', ''),
-            'tpr': options.get('tpr'),
-            'rps': options.get('rps')
-        })
+        print 'Stinging URL so it will be cached for the attack.'
 
-    print 'Stinging URL so it will be cached for the attack.'
+        request = urllib2.Request(url)
+        # Need to revisit to support all http verbs.
+        if post_file:
+            try:
+                with open(post_file, 'r') as content_file:
+                    content = content_file.read()
+                request.add_data(content)
+            except IOError:
+                print 'bees: error: The post file you provided doesn\'t exist.'
+                return
 
-    request = urllib2.Request(url)
-    # Need to revisit to support all http verbs.
-    if post_file:
-        try:
-            with open(post_file, 'r') as content_file:
-                content = content_file.read()
-            request.add_data(content)
-        except IOError:
-            print 'bees: error: The post file you provided doesn\'t exist.'
-            return
+        if cookies is not '':
+            request.add_header('Cookie', cookies)
 
-    if cookies is not '':
-        request.add_header('Cookie', cookies)
+        # Ping url so it will be cached for testing
+        dict_headers = {}
 
-    # Ping url so it will be cached for testing
-    dict_headers = {}
-    if headers is not '':
-        dict_headers = headers = dict(j.split(':') for j in [i.strip() for i in headers.split(';') if i != ''])
+        if headers is not '':
+            dict_headers = dict(j.split(':') for j in [i.strip() for i in headers.split(';') if i != ''])
 
-    for key, value in dict_headers.iteritems():
-        request.add_header(key, value)
+        for key, value in dict_headers.iteritems():
+            request.add_header(key, value)
 
-    response = urllib2.urlopen(request)
-    response.read()
+        response = urllib2.urlopen(request)
+        response.read()
 
-    print 'Organizing the swarm.'
-    # Spin up processes for connecting to EC2 instances
-    pool = Pool(len(params))
-    results = pool.map(_attack, params)
+        print 'Organizing the swarm.'
+        # Spin up processes for connecting to EC2 instances
+        pool = Pool(len(params))
+        results = pool.map(_attack, params)
 
-    summarized_results = _summarize_results(results, params, csv_filename)
-    print 'Offensive complete.'
-    _print_results(summarized_results)
+    sys.exit(0)
 
-    print 'The swarm is awaiting new orders.'
+    # summarized_results = _summarize_results(results, params, csv_filename)
+    # print 'Offensive complete.'
+    # _print_results(summarized_results)
 
-    if 'performance_accepted' in summarized_results:
-        if summarized_results['performance_accepted'] is False:
-            print("Your targets performance tests did not meet our standard.")
-            sys.exit(1)
-        else:
-            print('Your targets performance tests meet our standards, the Queen sends her regards.')
-            sys.exit(0)
+    # print 'The swarm is awaiting new orders.'
+
+    # if 'performance_accepted' in summarized_results:
+    #     if summarized_results['performance_accepted'] is False:
+    #         print("Your targets performance tests did not meet our standard.")
+    #         sys.exit(1)
+    #     else:
+    #         print('Your targets performance tests meet our standards, the Queen sends her regards.')
+    #         sys.exit(0)

@@ -85,7 +85,7 @@ commands:
     # Required
     attack_group.add_option('-u', '--url', metavar="URL", nargs=1,
                             action='store', dest='url', type='string',
-                            help="URL of the target to attack.")
+                            help="URLs of the target to attack, separated by semi-colons (;)")
     attack_group.add_option('-p', '--post-file',  metavar="POST_FILE",  nargs=1,
                             action='store', dest='post_file', type='string', default=False,
                             help="The POST file to deliver with the bee's payload.")
